@@ -1,7 +1,7 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QInputDialog,
                              QLineEdit, QScrollArea, QFrame, QDialog, QMessageBox, QShortcut, QSplitter, QTextEdit)
-from PyQt5.QtCore import Qt, QTimer, QSize, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QSize, QThread, pyqtSignal, QObject
 from PyQt5.QtGui import QFont, QKeySequence, QPainter, QColor, QImage
 import datetime
 from openpyxl import Workbook, load_workbook
@@ -20,17 +20,17 @@ class Order:
         "Bataadifriikad": {"price": 3, "key": "3"},
         "Bataadifriikad vinkudega": {"price": 4, "key": "4"},
         "Pelmeenid": {"price": 2.5, "key": "5"},
-        "Burger": {"price": 3, "key": "6"},
-
+        "Wrap": {"price": 3, "key": "6"},
+        "Burger": {"price": 3, "key": "7"},
+        "Kokteil klassika": {"price": 2, "key": "8"},
+        "Kokteil saladus": {"price": 2, "key": "9"},
     }
 
-    drin_items = {
+    drink_items_info = {
         "Coca-Cola": {"price": 1.5, "key": "g"},
         "Fanta": {"price": 1.5, "key": "h"},
         "Limpa": {"price": 1.5, "key": "j"},
-        "Vesi": {"price": 1.5, "key": "k"},
-        "Kokteil klassika": {"price": 2, "key": "l"},
-        "Kokteil saladus": {"price": 2, "key": ";"},
+        "Vesi": {"price": 1, "key": "k"},
     }
 
     bar_items_info = {
@@ -43,10 +43,11 @@ class Order:
         "Lammutaja BirgIT": {"price": 4, "key": ","},
         "Lendav sirel": {"price": 4, "key": "."},
         "Tugevusõpetus": {"price": 4, "key": "/"},
-        "red bull": {"price": 2, "key": "'"}
+        "red bull": {"price": 2, "key": "'"},
+        "õlu": {"price": 2, "key": "]"}
     }
 
-    combined_items_info = food_items_info | drin_items | bar_items_info
+    combined_items_info = food_items_info | drink_items_info | bar_items_info
 
     def __init__(self, order_number=None, food_items=None, drink_items=None,
                  bar_items=None, customer_name=None, creation_time=None,
@@ -62,7 +63,7 @@ class Order:
         self.food_items = food_items if food_items else {}
         self.bar_items = bar_items if bar_items else {}
         self.drink_items = drink_items if drink_items else {}
-        self.combined_order_items = self.food_items | self.bar_items
+        self.combined_order_items = self.food_items | self.drink_items | self.bar_items
         self.customer_name = customer_name
         self.total_cost = total_cost
         self.status = status
@@ -107,7 +108,13 @@ class Order:
             else:
                 order.bar_items[item] = 1
 
-        order.combined_order_items = order.food_items | order.bar_items
+        elif item in Order.drink_items_info:
+            if item in order.drink_items:
+                order.drink_items[item] += 1
+            else:
+                order.drink_items[item] = 1
+
+        order.combined_order_items = order.food_items | order.drink_items | order.bar_items
         return order
 
     @classmethod
@@ -126,15 +133,24 @@ class Order:
                 else:
                     del order.bar_items[item]
 
-        order.combined_order_items = order.food_items | order.bar_items
+        elif item in Order.drink_items_info:
+            if item in order.drink_items:
+                if order.drink_items[item] > 1:
+                    order.drink_items[item] -= 1
+                else:
+                    del order.drink_items[item]
+
+        order.combined_order_items = order.food_items | order.drink_items | order.bar_items
 
     @classmethod
     def get_prompt_text(cls):
         food_text = ", ".join(
             f"'{details['key']}' {item}" for item, details in Order.food_items_info.items())
+        drink_text = ", ".join(
+            f"'{details['key']}' {item}" for item, details in Order.drink_items_info.items())
         bar_text = ", ".join(
             f"'{details['key']}' {item}" for item, details in Order.bar_items_info.items())
-        return food_text + '\n' + bar_text + '\nEnter: finish order'
+        return food_text + '\n' + drink_text + '\n' + bar_text + '\nEnter: finish order'
 
 
 class KitchenManagerApp(QMainWindow):
@@ -265,7 +281,7 @@ class KitchenManagerApp(QMainWindow):
                     f"{order.order_number} | "
                     f"{order.creation_time.strftime('%H:%M:%S')} | "
                     f"{order.customer_name or 'N/A'} | "
-                    f"{', '.join([f'{item} x {quantity}' for item, quantity in order.food_items.items()])} | "
+                    f"{', '.join([f'{item} x {quantity}' for item, quantity in (order.food_items | order.drink_items).items()])} | "
                     f"{', '.join([f'{item} x {quantity}' for item, quantity in order.bar_items.items()])} | "
                     f"{order.card_or_cash} | "
                     f"{total_cost_display} | "
@@ -293,7 +309,7 @@ class KitchenManagerApp(QMainWindow):
 
         _update_manager_display()
         self.kitchen_window.update_display([order for order in self.orders_list if order.status == "active"])
-        # self.send_update_to_rpi()
+        self.send_update_to_rpi()
         self.save_orders_to_excel()
 
     def load_or_create_workbook(self):
@@ -356,7 +372,7 @@ class KitchenManagerApp(QMainWindow):
             order_number = order.order_number
             creation_time = order.creation_time.strftime('%Y-%m-%d %H:%M:%S')
             customer_name = order.customer_name or "N/A"
-            food_items = ", ".join([f"{item} x{quantity}" for item, quantity in order.food_items.items()])
+            food_items = ", ".join([f"{item} x{quantity}" for item, quantity in (order.food_items | order.drink_items).items()])
             bar_items = ", ".join([f"{item} x{quantity}" for item, quantity in order.bar_items.items()])
             c_or_c = order.card_or_cash
             total_cost = order.total_cost if isinstance(order.total_cost, (int, float)) else str(order.total_cost)
@@ -414,22 +430,28 @@ class KitchenManagerApp(QMainWindow):
         self.update_info_widget()
 
     def send_update_to_rpi(self):
-        active_order_numbers = [order for order in self.orders_list if order.status == "active"]
-        completed_order_numbers = [order for order in self.orders_list if order.status == "completed"]
+        active_order_numbers = [order.order_number for order in self.orders_list if order.status == "active"]
+        completed_order_numbers = [order.order_number for order in self.orders_list if order.status == "completed"]
 
         data = {
             'active_orders': active_order_numbers,
             'completed_orders': completed_order_numbers
         }
 
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((self.rpi_ip, self.rpi_port))
-                s.sendall(json.dumps(data).encode())
-            self.rpi_connected = True
-        except Exception as e:
-            print(f"Failed to send update to Raspberry Pi: {e}")
-            self.rpi_connected = False
+        self.rpi_thread = QThread()
+        self.rpi_worker = RPiUpdateThread(self.rpi_ip, self.rpi_port, data)
+        self.rpi_worker.moveToThread(self.rpi_thread)
+
+        self.rpi_thread.started.connect(self.rpi_worker.run)
+        self.rpi_worker.update_complete.connect(self.handle_rpi_update_complete)
+        self.rpi_worker.update_complete.connect(self.rpi_thread.quit)
+        self.rpi_thread.finished.connect(self.rpi_thread.deleteLater)
+        self.rpi_worker.update_complete.connect(self.rpi_worker.deleteLater)
+
+        self.rpi_thread.start()
+
+    def handle_rpi_update_complete(self, success):
+        self.rpi_connected = success
         self.update_info_widget()
 
 
@@ -465,6 +487,32 @@ class PingThread(QThread):
         except Exception as e:
             print(f"Error pinging RPi: {e}")
             self.ping_result.emit(False)
+
+
+class RPiUpdateThread(QObject):
+    update_complete = pyqtSignal(bool)
+
+    def __init__(self, rpi_ip, rpi_port, data):
+        super().__init__()
+        self.rpi_ip = rpi_ip
+        self.rpi_port = rpi_port
+        self.data = data
+
+    def run(self):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(2)  # Set a 2-second timeout
+                s.connect((self.rpi_ip, self.rpi_port))
+                json_data = json.dumps(self.data)
+                s.sendall(json_data.encode())
+            print(f"Sent data to RPi: {json_data}")  # Debug print
+            self.update_complete.emit(True)
+        except (socket.timeout, ConnectionRefusedError):
+            print("Raspberry Pi is not reachable. Continuing without sending update.")
+            self.update_complete.emit(False)
+        except Exception as e:
+            print(f"Unexpected error when trying to send update to Raspberry Pi: {e}")
+            self.update_complete.emit(False)
 
 
 class KitchenWindow(QWidget):
@@ -814,8 +862,10 @@ class NewOrderDialog(QDialog):
     def finish_order(self):
         if self.order_print:
             print_order(self.new_order)
-        if not self.new_order.food_items:
+        if not self.new_order.food_items and  not self.new_order.drink_items:
             self.new_order.status = "bar"
+        elif not self.new_order.food_items and  not self.new_order.bar_items:
+            self.new_order.status = "picked up"
         self.accept()
 
     def remove_shortcuts(self, key_sequences):
@@ -899,7 +949,7 @@ class EditOrderDialog(QDialog):
         self.order_input.returnPressed.connect(self.find_order)
 
         # Instructions label
-        self.instructions_label = QLabel("n: change name, p: change payment, s: change status, i: change food_items")
+        self.instructions_label = QLabel("n: change name, p: change payment, s: change status, i: change food_items, g: edit card or cash")
         self.instructions_label.hide()
         self.layout.addWidget(self.instructions_label)
 
@@ -920,6 +970,10 @@ class EditOrderDialog(QDialog):
         self.status_label.hide()
         self.layout.addWidget(self.status_label)
 
+        self.change_card_or_cash = QLabel("Enter: card 'C': cash")
+        self.change_card_or_cash.hide()
+        self.layout.addWidget(self.change_card_or_cash)
+
         # Set up shortcuts
         self.setup_shortcuts()
 
@@ -932,6 +986,7 @@ class EditOrderDialog(QDialog):
         QShortcut(QKeySequence('P'), self, self.edit_payment)
         QShortcut(QKeySequence('S'), self, self.edit_status)
         QShortcut(QKeySequence('D'), self, self.delete_order)
+        QShortcut(QKeySequence('G'), self, self.edit_card_or_cash)
 
     def find_order(self):
         try:
@@ -1038,6 +1093,27 @@ class EditOrderDialog(QDialog):
         self.status_label.show()
         set_shortcuts()
 
+    def edit_card_or_cash(self):
+
+        def set_shortcuts():
+            QShortcut(QKeySequence(Qt.Key_Return), self, lambda: finalize_payment('card'))
+            QShortcut(QKeySequence('C'), self, lambda: finalize_payment('cash'))
+
+        def finalize_payment(payment_type):
+            if payment_type == 'card':
+                self.selected_order.card_or_cash = "card"
+            elif payment_type == 'cash':
+                self.selected_order.card_or_cash = 'cash'
+
+            self.accept()
+
+        if not self.selected_order:
+            return
+        self.edit_area.hide()
+        self.instructions_label.hide()
+        self.change_card_or_cash.show()
+        set_shortcuts()
+
     def delete_order(self):
         self.kitchenManager.orders_list.remove(self.selected_order)
         self.accept()
@@ -1065,7 +1141,7 @@ class PrintOrderDialog(QDialog):
             QMessageBox.warning(self, "Invalid Input", "Please enter a valid order number.")
             return
 
-        for order in self.KitchenManager.order_list:
+        for order in self.KitchenManager.orders_list:
             if order.order_number == order_number:
                 print_order(order)
                 self.accept()
@@ -1088,13 +1164,14 @@ def print_order(order):
     if order.food_items:
         print_text('Sinu tellimus:', size=2)
         print('Sinu tellimus:')
-        for item, count in order.food_items.items():
+        for item, count in (order.food_items | order.drink_items).items():
             print(f"{item} x{count}")
             print_text(f"{item} x{count}")
         print_text('Tellimuse nr:', size=2)
         print('Tellimuse nr:')
         print_image(f"{str(order.order_number).zfill(3)}")
         print(f"{str(order.order_number).zfill(3)}")
+        print_text('\n\n\n\n\n\n\n\n')
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ font3 = 'BebasNeue-Regular.ttf'
 def create_large_number_image(number, output_path, font_path=path+font2,
                               font_size=220 * x):
     # Create an image with white background
-    width, height = 400 * x, 270 * x  # Adjust size as needed
+    width, height = 400 * x, 400 * x  # Adjust size as needed
     image = Image.new('1', (width, height), color=1)  # 1-bit pixels, black and white
     draw = ImageDraw.Draw(image)
 
